@@ -1,43 +1,58 @@
-const mongoose = require('mongoose');
+const sqlite3 = require('sqlite3').verbose();
+const path = require('path');
 
-const expenseSchema = new mongoose.Schema({
-  amount: {
-    type: Number,
-    required: [true, 'Please add an amount'],
-    min: [0, 'Amount must be positive']
-  },
-  category: {
-    type: String,
-    required: [true, 'Please add a category'],
-    enum: [
-      'Food & Dining',
-      'Transportation',
-      'Shopping',
-      'Entertainment',
-      'Bills & Utilities',
-      'Healthcare',
-      'Education',
-      'Travel',
-      'Personal Care',
-      'Other'
-    ]
-  },
-  description: {
-    type: String,
-    required: [true, 'Please add a description'],
-    maxlength: [200, 'Description cannot be more than 200 characters']
-  },
-  date: {
-    type: Date,
-    required: [true, 'Please add a date'],
-    default: Date.now
-  }
-}, {
-  timestamps: true
-});
+const dbPath = path.resolve(__dirname, '../expense_tracker.sqlite');
+const db = new sqlite3.Database(dbPath);
 
-// Add index for faster queries
-expenseSchema.index({ date: -1 });
-expenseSchema.index({ category: 1 });
+const Expense = {
+  create: (data, callback) => {
+    const { amount, category, description, date } = data;
+    db.run(
+      `INSERT INTO expenses (amount, category, description, date) VALUES (?, ?, ?, ?)`,
+      [amount, category, description, date],
+      function (err) {
+        callback(err, { id: this?.lastID, ...data });
+      }
+    );
+  },
+  findAll: (query, callback) => {
+    let sql = 'SELECT * FROM expenses';
+    const params = [];
+    const conditions = [];
+    if (query.category) {
+      conditions.push('category = ?');
+      params.push(query.category);
+    }
+    if (query.startDate) {
+      conditions.push('date >= ?');
+      params.push(query.startDate);
+    }
+    if (query.endDate) {
+      conditions.push('date <= ?');
+      params.push(query.endDate);
+    }
+    if (conditions.length) {
+      sql += ' WHERE ' + conditions.join(' AND ');
+    }
+    sql += ' ORDER BY date DESC';
+    db.all(sql, params, callback);
+  },
+  findById: (id, callback) => {
+    db.get('SELECT * FROM expenses WHERE id = ?', [id], callback);
+  },
+  update: (id, data, callback) => {
+    const { amount, category, description, date } = data;
+    db.run(
+      `UPDATE expenses SET amount = ?, category = ?, description = ?, date = ?, updatedAt = CURRENT_TIMESTAMP WHERE id = ?`,
+      [amount, category, description, date, id],
+      function (err) {
+        callback(err, { id, ...data });
+      }
+    );
+  },
+  delete: (id, callback) => {
+    db.run('DELETE FROM expenses WHERE id = ?', [id], callback);
+  },
+};
 
-module.exports = mongoose.model('Expense', expenseSchema);
+module.exports = Expense;

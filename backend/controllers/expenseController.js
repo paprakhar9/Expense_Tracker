@@ -5,39 +5,15 @@ const Expense = require('../models/Expense');
 // @access  Public
 exports.getExpenses = async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
-    const skip = (page - 1) * limit;
-
-    // Build query
-    const query = {};
-    if (req.query.category) {
-      query.category = req.query.category;
-    }
-    if (req.query.startDate || req.query.endDate) {
-      query.date = {};
-      if (req.query.startDate) {
-        query.date.$gte = new Date(req.query.startDate);
+    Expense.findAll(req.query, (err, expenses) => {
+      if (err) {
+        return res.status(500).json({ success: false, error: err.message });
       }
-      if (req.query.endDate) {
-        query.date.$lte = new Date(req.query.endDate);
-      }
-    }
-
-    const expenses = await Expense.find(query)
-      .sort({ date: -1 })
-      .limit(limit)
-      .skip(skip);
-
-    const count = await Expense.countDocuments(query);
-
-    res.status(200).json({
-      success: true,
-      count: expenses.length,
-      total: count,
-      page,
-      pages: Math.ceil(count / limit),
-      data: expenses
+      res.status(200).json({
+        success: true,
+        count: expenses.length,
+        data: expenses
+      });
     });
   } catch (error) {
     res.status(500).json({
@@ -52,18 +28,11 @@ exports.getExpenses = async (req, res) => {
 // @access  Public
 exports.getExpense = async (req, res) => {
   try {
-    const expense = await Expense.findById(req.params.id);
-
-    if (!expense) {
-      return res.status(404).json({
-        success: false,
-        error: 'Expense not found'
-      });
-    }
-
-    res.status(200).json({
-      success: true,
-      data: expense
+    Expense.findById(req.params.id, (err, expense) => {
+      if (err || !expense) {
+        return res.status(404).json({ success: false, error: 'Expense not found' });
+      }
+      res.status(200).json({ success: true, data: expense });
     });
   } catch (error) {
     res.status(500).json({
@@ -78,11 +47,11 @@ exports.getExpense = async (req, res) => {
 // @access  Public
 exports.createExpense = async (req, res) => {
   try {
-    const expense = await Expense.create(req.body);
-
-    res.status(201).json({
-      success: true,
-      data: expense
+    Expense.create(req.body, (err, expense) => {
+      if (err) {
+        return res.status(400).json({ success: false, error: err.message });
+      }
+      res.status(201).json({ success: true, data: expense });
     });
   } catch (error) {
     res.status(400).json({
@@ -97,25 +66,11 @@ exports.createExpense = async (req, res) => {
 // @access  Public
 exports.updateExpense = async (req, res) => {
   try {
-    const expense = await Expense.findByIdAndUpdate(
-      req.params.id,
-      req.body,
-      {
-        new: true,
-        runValidators: true
+    Expense.update(req.params.id, req.body, (err, expense) => {
+      if (err) {
+        return res.status(400).json({ success: false, error: err.message });
       }
-    );
-
-    if (!expense) {
-      return res.status(404).json({
-        success: false,
-        error: 'Expense not found'
-      });
-    }
-
-    res.status(200).json({
-      success: true,
-      data: expense
+      res.status(200).json({ success: true, data: expense });
     });
   } catch (error) {
     res.status(400).json({
@@ -130,18 +85,11 @@ exports.updateExpense = async (req, res) => {
 // @access  Public
 exports.deleteExpense = async (req, res) => {
   try {
-    const expense = await Expense.findByIdAndDelete(req.params.id);
-
-    if (!expense) {
-      return res.status(404).json({
-        success: false,
-        error: 'Expense not found'
-      });
-    }
-
-    res.status(200).json({
-      success: true,
-      message: 'Expense deleted successfully'
+    Expense.delete(req.params.id, (err) => {
+      if (err) {
+        return res.status(400).json({ success: false, error: err.message });
+      }
+      res.status(200).json({ success: true, message: 'Expense deleted successfully' });
     });
   } catch (error) {
     res.status(500).json({
@@ -157,54 +105,32 @@ exports.deleteExpense = async (req, res) => {
 exports.getMonthlyTotals = async (req, res) => {
   try {
     const year = parseInt(req.query.year) || new Date().getFullYear();
-    const month = req.query.month ? parseInt(req.query.month) : null;
+    const db = require('../models/Expense');
+    const sqlite3 = require('sqlite3').verbose();
+    const path = require('path');
+    const dbPath = path.resolve(__dirname, '../expense_tracker.sqlite');
+    const sqlDb = new sqlite3.Database(dbPath);
 
-    const matchStage = {
-      $expr: { $eq: [{ $year: '$date' }, year] }
-    };
-
-    if (month) {
-      matchStage.$expr = {
-        $and: [
-          { $eq: [{ $year: '$date' }, year] },
-          { $eq: [{ $month: '$date' }, month] }
-        ]
-      };
-    }
-
-    const result = await Expense.aggregate([
-      { $match: matchStage },
-      {
-        $group: {
-          _id: { month: { $month: '$date' }, year: { $year: '$date' } },
-          total: { $sum: '$amount' },
-          count: { $sum: 1 }
-        }
-      },
-      { $sort: { '_id.year': 1, '_id.month': 1 } }
-    ]);
-
-    const monthNames = [
-      'January', 'February', 'March', 'April', 'May', 'June',
-      'July', 'August', 'September', 'October', 'November', 'December'
-    ];
-
-    const formattedResult = result.map(item => ({
-      month: monthNames[item._id.month - 1],
-      year: item._id.year,
-      total: Math.round(item.total * 100) / 100,
-      count: item.count
-    }));
-
-    res.status(200).json({
-      success: true,
-      data: formattedResult
-    });
+    sqlDb.all(
+      `SELECT strftime('%m', date) AS month, SUM(amount) AS total, COUNT(*) AS count FROM expenses WHERE strftime('%Y', date) = ? GROUP BY month ORDER BY month ASC`,
+      [year.toString()],
+      (err, rows) => {
+        if (err) return res.status(500).json({ success: false, error: err.message });
+        const monthNames = [
+          'January', 'February', 'March', 'April', 'May', 'June',
+          'July', 'August', 'September', 'October', 'November', 'December'
+        ];
+        const formattedResult = rows.map(item => ({
+          month: monthNames[parseInt(item.month, 10) - 1],
+          year,
+          total: Math.round(item.total * 100) / 100,
+          count: item.count
+        }));
+        res.status(200).json({ success: true, data: formattedResult });
+      }
+    );
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 };
 
@@ -213,45 +139,39 @@ exports.getMonthlyTotals = async (req, res) => {
 // @access  Public
 exports.getCategoryTotals = async (req, res) => {
   try {
-    const query = {};
-    if (req.query.startDate || req.query.endDate) {
-      query.date = {};
-      if (req.query.startDate) {
-        query.date.$gte = new Date(req.query.startDate);
-      }
-      if (req.query.endDate) {
-        query.date.$lte = new Date(req.query.endDate);
-      }
+    const { startDate, endDate } = req.query;
+    const db = require('../models/Expense');
+    const sqlite3 = require('sqlite3').verbose();
+    const path = require('path');
+    const dbPath = path.resolve(__dirname, '../expense_tracker.sqlite');
+    const sqlDb = new sqlite3.Database(dbPath);
+
+    let sql = `SELECT category, SUM(amount) AS total FROM expenses`;
+    const params = [];
+    if (startDate && endDate) {
+      sql += ` WHERE date >= ? AND date <= ?`;
+      params.push(startDate, endDate);
+    } else if (startDate) {
+      sql += ` WHERE date >= ?`;
+      params.push(startDate);
+    } else if (endDate) {
+      sql += ` WHERE date <= ?`;
+      params.push(endDate);
     }
+    sql += ` GROUP BY category ORDER BY total DESC`;
 
-    const result = await Expense.aggregate([
-      ...(Object.keys(query).length > 0 ? [{ $match: query }] : []),
-      {
-        $group: {
-          _id: '$category',
-          total: { $sum: '$amount' }
-        }
-      },
-      { $sort: { total: -1 } }
-    ]);
-
-    const grandTotal = result.reduce((sum, item) => sum + item.total, 0);
-
-    const formattedResult = result.map(item => ({
-      category: item._id,
-      total: Math.round(item.total * 100) / 100,
-      percentage: Math.round((item.total / grandTotal) * 100)
-    }));
-
-    res.status(200).json({
-      success: true,
-      data: formattedResult
+    sqlDb.all(sql, params, (err, rows) => {
+      if (err) return res.status(500).json({ success: false, error: err.message });
+      const grandTotal = rows.reduce((sum, item) => sum + item.total, 0);
+      const formattedResult = rows.map(item => ({
+        category: item.category,
+        total: Math.round(item.total * 100) / 100,
+        percentage: grandTotal ? Math.round((item.total / grandTotal) * 100) : 0
+      }));
+      res.status(200).json({ success: true, data: formattedResult });
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 };
 
@@ -261,106 +181,110 @@ exports.getCategoryTotals = async (req, res) => {
 exports.getAIAnalysis = async (req, res) => {
   try {
     const period = req.query.period || 'month';
-    
-    // Calculate date ranges
     const now = new Date();
-    const currentPeriodStart = new Date();
-    const previousPeriodStart = new Date();
-    const previousPeriodEnd = new Date();
+    let currentStart, previousStart, previousEnd;
 
     if (period === 'week') {
-      currentPeriodStart.setDate(now.getDate() - 7);
-      previousPeriodStart.setDate(now.getDate() - 14);
-      previousPeriodEnd.setDate(now.getDate() - 7);
+      currentStart = new Date(now);
+      currentStart.setDate(now.getDate() - 7);
+      previousStart = new Date(now);
+      previousStart.setDate(now.getDate() - 14);
+      previousEnd = new Date(now);
+      previousEnd.setDate(now.getDate() - 7);
     } else if (period === 'month') {
-      currentPeriodStart.setMonth(now.getMonth() - 1);
-      previousPeriodStart.setMonth(now.getMonth() - 2);
-      previousPeriodEnd.setMonth(now.getMonth() - 1);
+      currentStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      previousStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      previousEnd = new Date(now.getFullYear(), now.getMonth(), 0);
     } else if (period === 'year') {
-      currentPeriodStart.setFullYear(now.getFullYear() - 1);
-      previousPeriodStart.setFullYear(now.getFullYear() - 2);
-      previousPeriodEnd.setFullYear(now.getFullYear() - 1);
+      currentStart = new Date(now.getFullYear(), 0, 1);
+      previousStart = new Date(now.getFullYear() - 1, 0, 1);
+      previousEnd = new Date(now.getFullYear(), 0, 0);
+    } else {
+      return res.status(400).json({ success: false, error: 'Invalid period' });
     }
 
-    // Get current period data
-    const currentData = await Expense.aggregate([
-      { $match: { date: { $gte: currentPeriodStart, $lte: now } } },
-      {
-        $group: {
-          _id: '$category',
-          total: { $sum: '$amount' }
+    const formatDate = d => d.toISOString().slice(0, 10);
+    const currentStartStr = formatDate(currentStart);
+    const nowStr = formatDate(now);
+    const previousStartStr = formatDate(previousStart);
+    const previousEndStr = formatDate(previousEnd);
+
+    const db = require('../models/Expense');
+    const sqlite3 = require('sqlite3').verbose();
+    const path = require('path');
+    const dbPath = path.resolve(__dirname, '../expense_tracker.sqlite');
+    const sqlDb = new sqlite3.Database(dbPath);
+
+    // Helper to get totals by category for a date range
+    function getTotalsByCategory(start, end, cb) {
+      sqlDb.all(
+        `SELECT category, SUM(amount) as total FROM expenses WHERE date >= ? AND date <= ? GROUP BY category`,
+        [start, end],
+        (err, rows) => {
+          if (err) return cb(err);
+          cb(null, rows);
         }
-      }
-    ]);
+      );
+    }
 
-    // Get previous period data
-    const previousData = await Expense.aggregate([
-      { $match: { date: { $gte: previousPeriodStart, $lte: previousPeriodEnd } } },
-      {
-        $group: {
-          _id: '$category',
-          total: { $sum: '$amount' }
-        }
-      }
-    ]);
+    getTotalsByCategory(currentStartStr, nowStr, (err, currentData) => {
+      if (err) return res.status(500).json({ success: false, error: err.message });
+      getTotalsByCategory(previousStartStr, previousEndStr, (err2, previousData) => {
+        if (err2) return res.status(500).json({ success: false, error: err2.message });
 
-    // Convert to maps for easier comparison
-    const currentMap = new Map(currentData.map(item => [item._id, item.total]));
-    const previousMap = new Map(previousData.map(item => [item._id, item.total]));
+        // Convert to maps for easier comparison
+        const currentMap = new Map(currentData.map(item => [item.category, item.total]));
+        const previousMap = new Map(previousData.map(item => [item.category, item.total]));
 
-    // Generate insights
-    const insights = [];
-    const trends = {
-      increasing: [],
-      decreasing: [],
-      stable: []
-    };
+        // Generate insights
+        const insights = [];
+        const trends = {
+          increasing: [],
+          decreasing: [],
+          stable: []
+        };
 
-    currentData.forEach(item => {
-      const currentTotal = item.total;
-      const previousTotal = previousMap.get(item._id) || 0;
-      
-      if (previousTotal > 0) {
-        const percentChange = ((currentTotal - previousTotal) / previousTotal) * 100;
-        
-        if (Math.abs(percentChange) > 10) {
-          if (percentChange > 0) {
-            insights.push(`Your ${item._id} spending is ${Math.round(percentChange)}% higher than last ${period}`);
-            trends.increasing.push(item._id);
-          } else {
-            insights.push(`Your ${item._id} spending is ${Math.round(Math.abs(percentChange))}% lower than last ${period}`);
-            trends.decreasing.push(item._id);
+        currentData.forEach(item => {
+          const currentTotal = item.total;
+          const previousTotal = previousMap.get(item.category) || 0;
+          if (previousTotal > 0) {
+            const percentChange = ((currentTotal - previousTotal) / previousTotal) * 100;
+            if (Math.abs(percentChange) > 10) {
+              if (percentChange > 0) {
+                insights.push(`Your ${item.category} spending is ${Math.round(percentChange)}% higher than last ${period}`);
+                trends.increasing.push(item.category);
+              } else {
+                insights.push(`Your ${item.category} spending is ${Math.round(Math.abs(percentChange))}% lower than last ${period}`);
+                trends.decreasing.push(item.category);
+              }
+            } else {
+              trends.stable.push(item.category);
+            }
           }
-        } else {
-          trends.stable.push(item._id);
+        });
+
+        // Generate recommendations
+        const recommendations = [];
+        if (currentData.length > 0) {
+          const topCategory = currentData.reduce((a, b) => (a.total > b.total ? a : b));
+          recommendations.push(`Consider reviewing your ${topCategory.category} expenses as they are your highest spending category`);
         }
-      }
-    });
+        if (trends.increasing.length > 0) {
+          recommendations.push(`Look for ways to reduce spending in: ${trends.increasing.join(', ')}`);
+        }
 
-    // Generate recommendations
-    const recommendations = [];
-    const topCategory = currentData[0];
-    if (topCategory) {
-      recommendations.push(`Consider reviewing your ${topCategory._id} expenses as they are your highest spending category`);
-    }
-    
-    if (trends.increasing.length > 0) {
-      recommendations.push(`Look for ways to reduce spending in: ${trends.increasing.join(', ')}`);
-    }
-
-    res.status(200).json({
-      success: true,
-      data: {
-        period,
-        insights: insights.length > 0 ? insights : ['Not enough data for meaningful insights yet'],
-        recommendations: recommendations.length > 0 ? recommendations : ['Keep tracking your expenses to get personalized recommendations'],
-        trends
-      }
+        res.status(200).json({
+          success: true,
+          data: {
+            period,
+            insights: insights.length > 0 ? insights : ['Not enough data for meaningful insights yet'],
+            recommendations: recommendations.length > 0 ? recommendations : ['Keep tracking your expenses to get personalized recommendations'],
+            trends
+          }
+        });
+      });
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 };
