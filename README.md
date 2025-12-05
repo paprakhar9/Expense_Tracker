@@ -73,13 +73,21 @@ npm install
    # or
    mongod --dbpath /path/to/data/directory
    
-   # Windows
+   # Windows (check your service name in Services)
    net start MongoDB
+   # or if that doesn't work:
+   # net start "MongoDB Server"
+   # or use the mongod command directly
    ```
 
 3. **Create Database**:
    ```bash
+   # For MongoDB Shell 1.0+ (newer installations)
    mongosh
+   use expense_tracker
+   
+   # For legacy MongoDB installations
+   mongo
    use expense_tracker
    ```
 
@@ -487,11 +495,13 @@ You can customize categories in the application settings.
 
 ## 🔒 Security
 
-- All API endpoints should be protected with JWT authentication
-- Environment variables for sensitive data
-- Input validation and sanitization
-- Rate limiting on API endpoints
-- HTTPS in production
+- **Authentication**: Consider implementing JWT authentication for production (currently optional)
+  - Add `Authorization: Bearer <token>` header to protected endpoints
+  - See authentication setup guide for implementation details
+- **Environment variables**: Store sensitive data in `.env` file (never commit to git)
+- **Input validation**: Validate and sanitize all user inputs
+- **Rate limiting**: Implement rate limiting on API endpoints in production
+- **HTTPS**: Always use HTTPS in production environments
 
 ## 🚀 Deployment
 
